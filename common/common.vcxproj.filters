@@ -1,0 +1,165 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="RingBuffer">
+      <UniqueIdentifier>{77d42f26-7b74-44f5-9d64-02b4df2f6e1a}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Thread">
+      <UniqueIdentifier>{79e3d89a-4cb9-4de1-b1a9-676a48409686}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="FileReader">
+      <UniqueIdentifier>{f31d41bc-f7f5-46fc-8591-6c4d9c3f4d8b}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Network">
+      <UniqueIdentifier>{96f4cc71-d78f-48a5-abed-7d84959d551c}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Network\ClientNetwork">
+      <UniqueIdentifier>{8f553ae6-acd2-4d82-961d-ed4ad901e915}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Network\ServerNetwork">
+      <UniqueIdentifier>{ccaf6116-8545-4e17-9d2e-2ccc65647c7f}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Network\ConnectInfo">
+      <UniqueIdentifier>{593fe8d5-24a4-40ed-926a-10affa509d75}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Daemon">
+      <UniqueIdentifier>{35ad4a2d-7ae2-4d4f-9499-3ce77879be70}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="FileLog">
+      <UniqueIdentifier>{4707344f-af7d-48ad-8592-f362036c02e1}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="lib_json">
+      <UniqueIdentifier>{8945bb0e-1335-40df-9dd0-7c2320beabf8}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="RingBuffer\RingBuffer.cpp">
+      <Filter>RingBuffer</Filter>
+    </ClCompile>
+    <ClCompile Include="Thread\Thread.cpp">
+      <Filter>Thread</Filter>
+    </ClCompile>
+    <ClCompile Include="FileReader\KDebug.cpp">
+      <Filter>FileReader</Filter>
+    </ClCompile>
+    <ClCompile Include="FileReader\KFile.cpp">
+      <Filter>FileReader</Filter>
+    </ClCompile>
+    <ClCompile Include="FileReader\KFilePath.cpp">
+      <Filter>FileReader</Filter>
+    </ClCompile>
+    <ClCompile Include="FileReader\KIniFile.cpp">
+      <Filter>FileReader</Filter>
+    </ClCompile>
+    <ClCompile Include="FileReader\KLinkArray.cpp">
+      <Filter>FileReader</Filter>
+    </ClCompile>
+    <ClCompile Include="FileReader\KMemBase.cpp">
+      <Filter>FileReader</Filter>
+    </ClCompile>
+    <ClCompile Include="FileReader\KMemClass.cpp">
+      <Filter>FileReader</Filter>
+    </ClCompile>
+    <ClCompile Include="FileReader\KMemStack.cpp">
+      <Filter>FileReader</Filter>
+    </ClCompile>
+    <ClCompile Include="FileReader\KPakFile.cpp">
+      <Filter>FileReader</Filter>
+    </ClCompile>
+    <ClCompile Include="FileReader\KStrBase.cpp">
+      <Filter>FileReader</Filter>
+    </ClCompile>
+    <ClCompile Include="FileReader\KTabFile.cpp">
+      <Filter>FileReader</Filter>
+    </ClCompile>
+    <ClCompile Include="Network\Client\Client.cpp">
+      <Filter>Network\ClientNetwork</Filter>
+    </ClCompile>
+    <ClCompile Include="Network\conn_info\conn_info.cpp">
+      <Filter>Network\ConnectInfo</Filter>
+    </ClCompile>
+    <ClCompile Include="Network\Server\Server.cpp">
+      <Filter>Network\ServerNetwork</Filter>
+    </ClCompile>
+    <ClCompile Include="main.cpp" />
+    <ClCompile Include="Network\NetworkHead.h">
+      <Filter>Network</Filter>
+    </ClCompile>
+    <ClCompile Include="Daemon\Daemon.cpp">
+      <Filter>Daemon</Filter>
+    </ClCompile>
+    <ClCompile Include="FileLog\FileLog.cpp">
+      <Filter>FileLog</Filter>
+    </ClCompile>
+    <ClCompile Include="common.cpp" />
+    <ClCompile Include="lib_json\json_reader.cpp">
+      <Filter>lib_json</Filter>
+    </ClCompile>
+    <ClCompile Include="lib_json\json_value.cpp">
+      <Filter>lib_json</Filter>
+    </ClCompile>
+    <ClCompile Include="lib_json\json_writer.cpp">
+      <Filter>lib_json</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="RingBuffer\RingBuffer.h">
+      <Filter>RingBuffer</Filter>
+    </ClInclude>
+    <ClInclude Include="FileReader\KTabFile.h">
+      <Filter>FileReader</Filter>
+    </ClInclude>
+    <ClInclude Include="FileReader\KList.h">
+      <Filter>FileReader</Filter>
+    </ClInclude>
+    <ClInclude Include="FileReader\KDebug.h">
+      <Filter>FileReader</Filter>
+    </ClInclude>
+    <ClInclude Include="Network\Client\Client.h">
+      <Filter>Network\ClientNetwork</Filter>
+    </ClInclude>
+    <ClInclude Include="Network\conn_info\conn_info.h">
+      <Filter>Network\ConnectInfo</Filter>
+    </ClInclude>
+    <ClInclude Include="Network\Server\Server.h">
+      <Filter>Network\ServerNetwork</Filter>
+    </ClInclude>
+    <ClInclude Include="stdafx.h" />
+    <ClInclude Include="FileReader\KIniFile.h">
+      <Filter>FileReader</Filter>
+    </ClInclude>
+    <ClInclude Include="FileLog\FileLog.h">
+      <Filter>FileLog</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Share\Header\Base\IFileLog.h">
+      <Filter>FileLog</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Share\Header\Base\Daemon.h">
+      <Filter>Daemon</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Share\Header\Base\IPackFile.h">
+      <Filter>FileReader</Filter>
+    </ClInclude>
+    <ClInclude Include="FileReader\KPakFile.h">
+      <Filter>FileReader</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Share\Header\Base\common.h" />
+    <ClInclude Include="..\Share\Header\Base\INetwork.h">
+      <Filter>Network</Filter>
+    </ClInclude>
+    <ClInclude Include="lib_json\json_batchallocator.h">
+      <Filter>lib_json</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="lib_json\json_internalarray.inl">
+      <Filter>lib_json</Filter>
+    </None>
+    <None Include="lib_json\json_internalmap.inl">
+      <Filter>lib_json</Filter>
+    </None>
+    <None Include="lib_json\json_valueiterator.inl">
+      <Filter>lib_json</Filter>
+    </None>
+  </ItemGroup>
+</Project>
