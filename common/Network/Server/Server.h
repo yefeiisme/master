@@ -1,11 +1,28 @@
 #ifndef _I_SERVER_H_
 #define _I_SERVER_H_
 
+#include <list>
 #include "../NetworkHead.h"
+
+using namespace std;
 
 class CServerNetwork : public IServerNetwork
 {
 private:
+	CALLBACK_SERVER_EVENT	m_pfnConnectCallBack;
+	void					*m_pFunParam;
+
+	CTcpConnection			*m_pListenLink;
+
+	CTcpConnection			*m_pTcpConnection;		// 所有的网络连接
+	CTcpConnection			**m_pFreeConn;			// 当前处理空闲状态的CNetLink索引数组
+
+	unsigned int			m_uMaxConnCount;
+	unsigned int			m_uFreeConnIndex;		// m_pFreeLink的索引，类似list的iterator用法
+
+	unsigned int			m_uClientRecvBuffSize;
+	unsigned int			m_uClientSendBuffSize;
+
 #ifdef __linux
 	int						m_nepfd;
 #elif defined(WIN32) || defined(WIN64)
@@ -13,28 +30,36 @@ private:
 	fd_set					m_ErrorSet;
 #elif defined(__APPLE__)
 #endif
-	CALLBACK_SERVER_EVENT	m_pfnConnectCallBack;
-	void					*m_pFunParam;
 
-	CTcpConnection			*m_pListenLink;
+	// 暂时先用这个list，后面改为TList
+	// ...
+	list<CTcpConnection*>	m_listActiveConn;
+	list<CTcpConnection*>	m_listCloseWaitConn;
 
-	unsigned int			m_uMaxConnCount;
-	CTcpConnection			*m_pTcpConnection;		// 所有的网络连接
-	CTcpConnection			**m_pFreeConn;			// 当前处理空闲状态的CNetLink索引数组
-	unsigned int			m_uFreeConnIndex;		// m_pFreeLink的索引，类似list的iterator用法
-
-	unsigned int			m_uClientRecvBuffSize;
-	unsigned int			m_uClientSendBuffSize;
-
-	unsigned int			m_uSleepFrame;
 	bool					m_bRunning;
 private:
-	int						SetNoBlocking(CTcpConnection *pNetLink);
+	inline CTcpConnection	*GetNewConnection()
+	{
+		return m_uFreeConnIndex >= m_uMaxConnCount ? NULL : m_pFreeConn[m_uFreeConnIndex++];
+	}
+
+	inline void				AddAvailableConnection(CTcpConnection *pConnection)
+	{
+		if (m_uFreeConnIndex)
+		{
+			m_pFreeConn[--m_uFreeConnIndex]	= pConnection;
+		}
+	}
+
+	int						SetNoBlocking(CTcpConnection *pTcpConnection);
 	bool					AcceptClient(const SOCKET nNewSocket);
 
-	bool					DelClient(const unsigned int nNetworkIndex);
+	bool					DelClient(CTcpConnection *pTcpConnection);
 	void					ReadAction();
 	void					WriteAction();
+	void					CloseAction();
+
+	void					ThreadFunc();
 public:
 	CServerNetwork();
 	~CServerNetwork();

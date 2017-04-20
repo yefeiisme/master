@@ -119,7 +119,7 @@ const char *CTcpConnection::GetIP()
 
 int CTcpConnection::RecvData()
 {
-	if (NET_LINK_STATE_DISCONNNECT == m_eStatus)
+	if (!m_bSocketConnected)
 		return 0;
 
 	char	*pRecvStart	= m_pRecv;
@@ -207,8 +207,7 @@ int CTcpConnection::RecvData()
 
 const void *CTcpConnection::GetPack(unsigned int &uPackLen)
 {
-	// not active?
-	if (NET_LINK_STATE_DISCONNNECT == m_eStatus)
+	if (!m_bLogicConnected)
 		return NULL;
 	
 	char			*pPackStart	= m_pPack;
@@ -305,7 +304,7 @@ const void *CTcpConnection::GetPack(unsigned int &uPackLen)
 
 bool CTcpConnection::PutPack(const void* pPack, unsigned int uPackLen)
 {
-	if (NET_LINK_STATE_DISCONNNECT == m_eStatus)
+	if (!m_bSocketConnected)
 		return false;
 
 	char	*pPutStart	= m_pSend;
@@ -378,11 +377,8 @@ bool CTcpConnection::PutPack(const void* pPack, unsigned int uPackLen)
 }
 
 
-int CTcpConnection::FlushData()
+int CTcpConnection::SendData()
 {
-	if (NET_LINK_STATE_DISCONNNECT == m_eStatus)
-		return 0;
-	
 	char	*pFlushStart	= m_pFlush;
 	char	*pFlushEnd		= m_pSend;
 	int		nMaxSendBytes;
@@ -460,10 +456,12 @@ int CTcpConnection::FlushData()
 
 void CTcpConnection::Disconnect()
 {
-	if (NET_LINK_STATE_DISCONNNECT == m_eStatus)
-		return;
+	m_bSocketConnected	= false;
+	m_bConnectSuccess	= false;
 
-	m_eStatus	= NET_LINK_STATE_DISCONNNECT;
-	closesocket(m_nSock);
-	m_nSock		= INVALID_SOCKET;
+	if (INVALID_SOCKET != m_nSock)
+	{
+		closesocket(m_nSock);
+		m_nSock		= INVALID_SOCKET;
+	}
 }

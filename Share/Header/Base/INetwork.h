@@ -8,7 +8,7 @@ public:
 	virtual bool			IsConnect() = 0;										// 用于在逻辑层判断是否是连接状态
 	virtual const void		*GetPack(unsigned int &uPackLen) = 0;					// 获取已收到的网络数据包
 	virtual bool			PutPack(const void *pPack, unsigned int uPackLen) = 0;	// 发送网络数据包
-	virtual void			Disconnect() = 0;										// 断开操作：1.用于网络库在运行的时候，断开网络连接；2.用于网络库回收该TcpConnection对象
+	virtual void			ShutDown() = 0;											// 断开操作：用于外部（逻辑层）主动发起的断开连接
 	virtual const char		*GetIP() = 0;
 };
 

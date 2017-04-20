@@ -47,6 +47,16 @@ public:
 	CTcpConnection();
 	~CTcpConnection();
 
+	inline bool					IsSocketConnected()
+	{
+		return m_bSocketConnected;
+	}
+
+	inline bool					IsLogicConnected()
+	{
+		return m_bLogicConnected;
+	}
+
 	inline bool					IsConnectSuccess()
 	{
 		return m_bConnectSuccess;
@@ -79,9 +89,15 @@ public:
 	const char					*GetIP();
 
 	int							RecvData();
-	int							FlushData();
+	int							SendData();
 	bool						PutPack(const void *pPack, unsigned int uPackLen);
 	const void					*GetPack(unsigned int &uPackLen);
+
+	inline void					ShutDown()
+	{
+		m_bLogicConnected	= false;
+	}
+
 	void						Disconnect();
 	inline void					WaitConnect()
 	{

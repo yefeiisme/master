@@ -14,6 +14,19 @@
 
 CServerNetwork::CServerNetwork()
 {
+	m_pfnConnectCallBack	= NULL;
+	m_pFunParam				= NULL;
+
+	m_pListenLink			= NULL;
+
+	m_pTcpConnection		= NULL;
+	m_pFreeConn				= NULL;
+	m_uMaxConnCount			= 0;
+	m_uFreeConnIndex		= 0;
+
+	m_uClientRecvBuffSize	= 0;
+	m_uClientSendBuffSize	= 0;
+
 #if defined(__linux)
 	m_nepfd					= 0;
 #elif defined(WIN32) || defined(WIN64)
@@ -22,20 +35,9 @@ CServerNetwork::CServerNetwork()
 #elif defined(__APPLE__)
 #endif
 
-	m_pfnConnectCallBack	= NULL;
-	m_pFunParam				= NULL;
+	m_listActiveConn.clear();
+	m_listCloseWaitConn.clear();
 
-	m_pListenLink			= NULL;
-
-	m_uMaxConnCount			= 0;
-	m_pTcpConnection		= NULL;
-	m_pFreeConn				= NULL;
-	m_uFreeConnIndex		= 0;
-
-	m_uClientRecvBuffSize	= 0;
-	m_uClientSendBuffSize	= 0;
-
-	m_uSleepFrame			= 0;
 	m_bRunning				= false;
 }
 
@@ -59,40 +61,37 @@ CServerNetwork::~CServerNetwork()
 #endif
 }
 
-int CServerNetwork::SetNoBlocking(CTcpConnection *pNetLink)
+int CServerNetwork::SetNoBlocking(CTcpConnection *pTcpConnection)
 {
-	if (NULL == pNetLink)
+	if (NULL == pTcpConnection)
 		return -1;
 
 #if defined(WIN32) || defined(WIN64)
 	unsigned long ulNonBlock = 1;
-	return ioctlsocket(pNetLink->m_nSock, FIONBIO, &ulNonBlock);
+	return ioctlsocket(pTcpConnection->m_nSock, FIONBIO, &ulNonBlock);
 #elif defined(__linux)
 	int nFlags;
-	if ((nFlags = fcntl(pNetLink->m_nSock, F_GETFL, 0)) < 0 || fcntl(pNetLink->m_nSock, F_SETFL, nFlags | O_NONBLOCK) < 0)
+	if ((nFlags = fcntl(pTcpConnection->m_nSock, F_GETFL, 0)) < 0 || fcntl(pTcpConnection->m_nSock, F_SETFL, nFlags | O_NONBLOCK) < 0)
 		return -1;
 
 	epoll_event ev	={ 0 };
 
-	ev.data.ptr	= pNetLink;
+	ev.data.ptr	= pTcpConnection;
 	ev.events	= EPOLLIN | EPOLLET | EPOLLPRI | EPOLLHUP | EPOLLERR;
 
-	return epoll_ctl(m_nepfd, EPOLL_CTL_ADD, pNetLink->m_nSock, &ev);
+	return epoll_ctl(m_nepfd, EPOLL_CTL_ADD, pTcpConnection->m_nSock, &ev);
 #elif defined(__APPLE__)
 #endif
 }
 
 bool CServerNetwork::AcceptClient(const SOCKET nNewSocket)
 {
-	if (m_uFreeConnIndex >= m_uMaxConnCount)
+	CTcpConnection	*pNewLink	= GetNewConnection();
+	if (NULL == pNewLink)
 	{
 		closesocket(nNewSocket);
 		return false;
 	}
-
-	CTcpConnection	*pNewLink	= m_pFreeConn[m_uFreeConnIndex];
-
-	++m_uFreeConnIndex;
 
 	pNewLink->ReInit(nNewSocket);
 
@@ -100,7 +99,7 @@ bool CServerNetwork::AcceptClient(const SOCKET nNewSocket)
 
 	if (-1 == SetNoBlocking(pNewLink))
 	{
-		DelClient(pNewLink->m_uConnID);
+		DelClient(pNewLink);
 
 #if defined(WIN32) || defined(WIN64)
 		g_pFileLog->WriteLog("ioctlsocket() failed with error %d\n", WSAGetLastError());
@@ -112,28 +111,28 @@ bool CServerNetwork::AcceptClient(const SOCKET nNewSocket)
 		return false;
 	}
 
+	m_listActiveConn.push_back(pNewLink);
+
 	m_pfnConnectCallBack(m_pFunParam, pNewLink);
 
 	return true;
 }
 
-bool CServerNetwork::DelClient(const unsigned int nClientID)
+bool CServerNetwork::DelClient(CTcpConnection *pTcpConnection)
 {
-	if (nClientID >= m_uMaxConnCount)
+	if (NULL == pTcpConnection)
 		return false;
 
-	if (!m_pTcpConnection[nClientID].IsConnect())
+	if (!pTcpConnection->IsConnect())
 		return false;
 
 #if defined(__linux)
-	int ret = epoll_ctl(m_nepfd, EPOLL_CTL_DEL, m_pTcpConnection[nClientID].m_nSock, NULL);
+	int ret = epoll_ctl(m_nepfd, EPOLL_CTL_DEL, pTcpConnection->m_nSock, NULL);
 #elif defined(__APPLE__)
 #endif
-	m_pTcpConnection[nClientID].Disconnect();
+	pTcpConnection->Disconnect();
 
-	m_pFreeConn[--m_uFreeConnIndex]	= &m_pTcpConnection[nClientID];
-
-	//m_pfnDisconnectCallBack(m_pFunParam, nClientID);
+	AddAvailableConnection(pTcpConnection);
 
 	return true;
 }
@@ -179,12 +178,12 @@ void CServerNetwork::ReadAction()
 		{
 			if (m_pTcpConnection[nIndex].RecvData() == -1)
 			{
-				DelClient(m_pTcpConnection[nIndex].m_uConnID);
+				DelClient(&m_pTcpConnection[nIndex]);
 			}
 		}
 		else if (FD_ISSET(m_pTcpConnection[nIndex].m_nSock, &m_ErrorSet))
 		{
-			DelClient(m_pTcpConnection[nIndex].m_uConnID);
+			DelClient(&m_pTcpConnection[nIndex]);
 		}
 	}
 }
@@ -219,7 +218,7 @@ void CServerNetwork::ReadAction()
 		{
 			if (pNetLink->RecvData() == -1)
 			{
-				DelClient(pNetLink->m_uConnID);
+				DelClient(pNetLink);
 			}
 		}
 		else if (wv[nLoopCount].events & EPOLLPRI)
@@ -229,12 +228,12 @@ void CServerNetwork::ReadAction()
 		}
 		else if (wv[nLoopCount].events & EPOLLHUP)
 		{
-			DelClient(pNetLink->m_uConnID);
+			DelClient(pNetLink);
 		}
 		else if (wv[nLoopCount].events & EPOLLERR)
 		{
 			// error
-			DelClient(pNetLink->m_uConnID);
+			DelClient(pNetLink);
 		}
 	}
 }
@@ -243,12 +242,56 @@ void CServerNetwork::ReadAction()
 
 void CServerNetwork::WriteAction()
 {
-	for (int nIndex = 0; nIndex < m_uMaxConnCount; ++nIndex)
+	CTcpConnection	*pTcpConnection	= NULL;
+	for (list<CTcpConnection*>::iterator Iter = m_listActiveConn.begin(); Iter != m_listActiveConn.end();)
 	{
-		if (m_pTcpConnection[nIndex].FlushData() == -1)
+		pTcpConnection	= *Iter;
+		if (!pTcpConnection->IsLogicConnected())
 		{
-			DelClient(nIndex);
+			DelClient(pTcpConnection);
+			Iter	= m_listActiveConn.erase(Iter);
+			continue;
 		}
+
+		if (pTcpConnection->SendData() == -1)
+		{
+#if defined(__linux)
+			int ret = epoll_ctl(m_nepfd, EPOLL_CTL_DEL, pTcpConnection->m_nSock, NULL);
+#elif defined(__APPLE__)
+#endif
+			pTcpConnection->Disconnect();
+
+			m_listCloseWaitConn.push_back(pTcpConnection);
+			Iter	= m_listActiveConn.erase(Iter);
+			continue;
+		}
+
+		++Iter;
+	}
+}
+
+void CServerNetwork::CloseAction()
+{
+	CTcpConnection	*pTcpConnection	= NULL;
+	for (list<CTcpConnection*>::iterator Iter = m_listCloseWaitConn.begin(); Iter != m_listCloseWaitConn.end();)
+	{
+		pTcpConnection	= *Iter;
+		if (pTcpConnection->IsLogicConnected())
+		{
+			++Iter;
+			continue;
+		}
+
+		AddAvailableConnection(pTcpConnection);
+
+		Iter	= m_listCloseWaitConn.erase(Iter);
+	}
+}
+
+void CServerNetwork::ThreadFunc()
+{
+	while (m_bRunning)
+	{
 	}
 }
 
@@ -379,9 +422,9 @@ bool CServerNetwork::Initialize(
 
 	if (bThread)
 	{
+		m_bRunning	= true;
 		// 开启线程，执行DoNetworkAction
 		// ...
-		m_bRunning	= true;
 	}
 
 	return true;
@@ -412,6 +455,7 @@ void CServerNetwork::DoNetworkAction()
 {
 	ReadAction();
 	WriteAction();
+	CloseAction();
 }
 
 IServerNetwork *CreateServerNetwork(
@@ -427,7 +471,7 @@ IServerNetwork *CreateServerNetwork(
 	const unsigned int uSleepFrame
 )
 {
-	CServerNetwork  *pServer = new CServerNetwork();
+	CServerNetwork	*pServer = new CServerNetwork();
 	if (NULL == pServer)
 		return NULL;
 

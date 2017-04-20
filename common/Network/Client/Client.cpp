@@ -29,8 +29,8 @@ CClientNetwork::~CClientNetwork()
 {
 	for (int nIndex = 0; nIndex < m_uMaxLinkCount; ++nIndex)
 	{
-		if (!m_pLinkList[nIndex].IsDisconnected())
-			m_pLinkList[nIndex].Disconnect();
+		m_pLinkList[nIndex].ShutDown();
+		m_pLinkList[nIndex].Disconnect();
 	}
 
 	SAFE_DELETE_ARR(m_pLinkList);
@@ -92,9 +92,9 @@ bool CClientNetwork::Initialize(
 
 	if (bThread)
 	{
+		m_bRunning	= true;
 		// 开启线程，执行DoNetworkAction
 		// ...
-		m_bRunning	= true;
 	}
 
 	return true;
@@ -311,7 +311,7 @@ void CClientNetwork::ProcessConnectedLink(CTcpConnection *pNetLink)
 
 		if (FD_ISSET(pNetLink->m_nSock, &m_WriteSet))
 		{
-			if (pNetLink->FlushData() == -1)
+			if (pNetLink->SendData() == -1)
 			{
 				CloseNetLink(pNetLink);
 			}
