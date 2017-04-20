@@ -1,20 +1,35 @@
 #include "conn_info.h"
 #include "IFileLog.h"
 
-CNetworkConection::CNetworkConection()
+CTcpConnection::CTcpConnection()
 {
-	m_eStatus		= NET_LINK_STATE_DISCONNNECT;
-	m_uConnID		= 0;
-	m_pSendBuf		= NULL;
-	m_pRecvBuf		= NULL;
-	m_pTempRecvBuf	= NULL;
-	m_pTempSendBuf	= NULL;
+	m_nSock				= INVALID_SOCKET;
+	m_uConnID			= 0;
 
-	m_nSock			= INVALID_SOCKET;
-	m_bIPV6			= false;
+	m_eStatus			= NET_LINK_STATE_DISCONNNECT;
+
+	m_pSendBuf			= NULL;
+	m_pTempSendBuf		= NULL;
+	m_pFlush			= NULL;
+	m_pSend				= NULL;
+	m_uSendBufLen		= 0;
+	m_uTempSendBufLen	= 0;
+
+	m_pRecvBuf			= NULL;
+	m_pTempRecvBuf		= NULL;
+	m_pPack				= NULL;
+	m_pRecv				= NULL;
+	m_pUnreleased		= NULL;
+	m_uRecvBufLen		= 0;
+	m_uTempRecvBufLen	= 0;
+
+	m_bSocketConnected	= false;
+	m_bLogicConnected	= false;
+	m_bConnectSuccess	= false;
+	m_bIPV6				= false;
 }
 
-CNetworkConection::~CNetworkConection()
+CTcpConnection::~CTcpConnection()
 {
 	SAFE_DELETE_ARR(m_pSendBuf);
 	SAFE_DELETE_ARR(m_pRecvBuf);
@@ -22,7 +37,7 @@ CNetworkConection::~CNetworkConection()
 	SAFE_DELETE_ARR(m_pTempSendBuf);
 }
 
-bool CNetworkConection::Initialize(unsigned int uRecvBufferLen, unsigned int uSendBufferLen, unsigned int uTempRecvBufLen, unsigned int uTempSendBufLen)
+bool CTcpConnection::Initialize(unsigned int uRecvBufferLen, unsigned int uSendBufferLen, unsigned int uTempRecvBufLen, unsigned int uTempSendBufLen)
 {
 	if (0 == uRecvBufferLen || 0 == uSendBufferLen)
 		return false;
@@ -61,17 +76,7 @@ bool CNetworkConection::Initialize(unsigned int uRecvBufferLen, unsigned int uSe
 	return true;
 }
 
-bool CNetworkConection::ReInit(const int nSocket, const bool bIPV6)
-{
-	m_pUnreleased	= m_pRecv = m_pPack = m_pRecvBuf;
-	m_pFlush		= m_pSend = m_pSendBuf;
-	m_nSock			= nSocket;
-	m_bIPV6			= bIPV6;
-
-	return true;
-}
-
-const char *CNetworkConection::GetIP()
+const char *CTcpConnection::GetIP()
 {
 	if (m_bIPV6)
 	{
@@ -87,10 +92,11 @@ const char *CNetworkConection::GetIP()
 
 		if (getpeername(m_nSock, (sockaddr*)&tagClientAddr, &nAddrLen))
 		{
-#if defined(WIN32)
+#if defined(WIN32) || defined(WIN64)
 			g_pFileLog->WriteLog("%s:%d, CNetLink::reinit Client[%4u] getpeername Error[%d]\n", __FILE__, __LINE__, m_uConnID, WSAGetLastError());
-#else
+#elif defined(__linux)
 			g_pFileLog->WriteLog("%s:%d, CNetLink::reinit Client[%4u] getpeername Error[%d]\n", __FILE__, __LINE__, m_uConnID, errno);
+#elif defined(__APPLE__)
 #endif
 			return false;
 		}
@@ -98,10 +104,11 @@ const char *CNetworkConection::GetIP()
 		char	*strIP	= inet_ntoa(tagClientAddr.sin_addr);
 		if (NULL == strIP)
 		{
-#if defined(WIN32)
+#if defined(WIN32) || defined(WIN64)
 			g_pFileLog->WriteLog("%s:%d, CNetLink::reinit Client[%4u] inet_ntoa Error[%d]\n", __FILE__, __LINE__, m_uConnID, WSAGetLastError());
-#else
+#elif defined(__linux)
 			g_pFileLog->WriteLog("%s:%d, CNetLink::reinit Client[%4u] inet_ntoa Error[%d]\n", __FILE__, __LINE__, m_uConnID, errno);
+#elif defined(__APPLE__)
 #endif
 			return false;
 		}
@@ -110,7 +117,7 @@ const char *CNetworkConection::GetIP()
 	}
 }
 
-int CNetworkConection::RecvData()
+int CTcpConnection::RecvData()
 {
 	if (NET_LINK_STATE_DISCONNNECT == m_eStatus)
 		return 0;
@@ -144,12 +151,13 @@ int CNetworkConection::RecvData()
 		}
 		else if (errno != EAGAIN)
 		{
-#if defined(WIN32)
+#if defined(WIN32) || defined(WIN64)
 			int	nError	= WSAGetLastError();
 			if (WSAECONNRESET != nError)
-#else
+#elif defined(__linux)
 			int	nError	= errno;
 			if (ECONNRESET != nError)
+#elif defined(__APPLE__)
 #endif
 			{
 				g_pFileLog->WriteLog("file: %s, line: %d, errno: %d\n", __FILE__, __LINE__, nError);
@@ -173,9 +181,7 @@ int CNetworkConection::RecvData()
 	else if (nReadedBytes == nMaxReadBytes)
 	{
 		// Overflow
-#if defined(WIN32) || defined(_linux)
-		g_pFileLog->WriteLog("ERROR on CNetLink::recvdata Client[%4u] recvbuffer overflow!!!\n", m_uConnID);
-#endif
+		g_pFileLog->WriteLog("ERROR on CNetLink::recvdata Client[%4u] recvbuffer overflow\n", m_uConnID);
 		return -1;
 	}
 	else if (nReadedBytes == 0)
@@ -184,11 +190,11 @@ int CNetworkConection::RecvData()
 	}
 	else if (errno != EAGAIN)
 	{
-#if defined(WIN32)
+#if defined(WIN32) || defined(WIN64)
 		g_pFileLog->WriteLog("file: %s, line: %d, errno: %d\n", __FILE__, __LINE__, WSAGetLastError());
-//#elif defined(_linux)
-#else
+#elif defined(__linux)
 		g_pFileLog->WriteLog("file: %s, line: %d, errno: %d\n", __FILE__, __LINE__, errno);
+#elif defined(__APPLE__)
 #endif
 		return -1;
 	}
@@ -199,7 +205,7 @@ int CNetworkConection::RecvData()
 	}
 }
 
-const void *CNetworkConection::GetPack(unsigned int &uPackLen)
+const void *CTcpConnection::GetPack(unsigned int &uPackLen)
 {
 	// not active?
 	if (NET_LINK_STATE_DISCONNNECT == m_eStatus)
@@ -271,9 +277,7 @@ const void *CNetworkConection::GetPack(unsigned int &uPackLen)
 		// wrapped
 		if (nTailLen > m_uTempRecvBufLen || usPackLength - nTailLen > m_uTempRecvBufLen - nTailLen)
 		{
-#if defined(WIN32) || defined(_linux)
 			g_pFileLog->WriteLog("[%s][%d] Client[%4u]:Recv temp buff overflow tail_length = %d tmp_recvbuf_len = %u, pack_length = %u\n", __FILE__, __LINE__, m_uConnID, nTailLen, m_uTempSendBufLen, uPackLen);
-#endif
 			return NULL;
 		}
 		memcpy(m_pTempRecvBuf, pPackStart, nTailLen);
@@ -299,10 +303,10 @@ const void *CNetworkConection::GetPack(unsigned int &uPackLen)
 	return pRetBuf;
 }
 
-int CNetworkConection::PutPack(const void* pPack, unsigned int uPackLen)
+bool CTcpConnection::PutPack(const void* pPack, unsigned int uPackLen)
 {
 	if (NET_LINK_STATE_DISCONNNECT == m_eStatus)
-		return 0;
+		return false;
 
 	char	*pPutStart	= m_pSend;
 	char	*pPutEnd	= m_pFlush;
@@ -317,10 +321,8 @@ int CNetworkConection::PutPack(const void* pPack, unsigned int uPackLen)
 	// in this case; we just close the conn;
 	if (uPackLen >= nEmptyLen)
 	{
-#if defined(WIN32) || defined(_linux)
 		g_pFileLog->WriteLog("[%s][%d] CNetLink::putpack Client[%4u]: Send buffer overflow!!!\n", __FILE__, __LINE__, m_uConnID);
-#endif
-		return -1;
+		return false;
 	}
 
 	int	nTailLen = m_pSendBuf + m_uSendBufLen - pPutStart;
@@ -344,10 +346,8 @@ int CNetworkConection::PutPack(const void* pPack, unsigned int uPackLen)
 	{
 		if (m_uTempSendBufLen < uPackLen - sizeof(unsigned short))
 		{
-#if defined(WIN32) || defined(_linux)
 			g_pFileLog->WriteLog("[%s][%d] Client[%4u]:Send temp buff overflow tmp_sendbuf_len = %u, pack_len = %u\n", __FILE__, __LINE__, m_uConnID, m_uTempSendBufLen, uPackLen);
-#endif
-			return -1;
+			return false;
 		}
 		memcpy(m_pTempSendBuf, pData, uPackLen - sizeof(unsigned short));
 
@@ -374,11 +374,11 @@ int CNetworkConection::PutPack(const void* pPack, unsigned int uPackLen)
 			m_pSend	= m_pSendBuf + uPackLen - 1;
 		}
 	}
-	return 0;
+	return true;
 }
 
 
-int CNetworkConection::FlushData()
+int CTcpConnection::FlushData()
 {
 	if (NET_LINK_STATE_DISCONNNECT == m_eStatus)
 		return 0;
@@ -442,11 +442,11 @@ int CNetworkConection::FlushData()
 
 	if (errno != EAGAIN)
 	{
-#if defined(WIN32)
+#if defined(WIN32) || defined(WIN64)
 		g_pFileLog->WriteLog("file: %s, line: %d, errno: %d\n", __FILE__, __LINE__, WSAGetLastError());
-//#elif defined(_linux)
-#else
+#elif defined(__linux)
 		g_pFileLog->WriteLog("file: %s, line: %d, errno: %d\n", __FILE__, __LINE__, errno);
+#elif defined(__APPLE__)
 #endif
 		return -1;
 	}
@@ -458,14 +458,12 @@ int CNetworkConection::FlushData()
 	
 }
 
-bool CNetworkConection::Disconnect()
+void CTcpConnection::Disconnect()
 {
 	if (NET_LINK_STATE_DISCONNNECT == m_eStatus)
-		return false;
+		return;
 
 	m_eStatus	= NET_LINK_STATE_DISCONNNECT;
 	closesocket(m_nSock);
 	m_nSock		= INVALID_SOCKET;
-
-	return true;
 }

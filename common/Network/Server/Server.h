@@ -8,25 +8,28 @@ class CServerNetwork : public IServerNetwork
 private:
 #ifdef __linux
 	int						m_nepfd;
-#else
+#elif defined(WIN32) || defined(WIN64)
 	fd_set					m_ReadSet;
 	fd_set					m_ErrorSet;
+#elif defined(__APPLE__)
 #endif
 	CALLBACK_SERVER_EVENT	m_pfnConnectCallBack;
-	CALLBACK_SERVER_EVENT	m_pfnDisconnectCallBack;
 	void					*m_pFunParam;
 
-	CNetworkConection		*m_pListenLink;
+	CTcpConnection			*m_pListenLink;
 
-	unsigned int			m_uMaxClientCount;
-	CNetworkConection		*m_pLinkList;			// 所有的网络连接
-	CNetworkConection		**m_pFreeLink;			// 当前处理空闲状态的CNetLink索引数组
-	unsigned int			m_uFreeLinkIndex;		// m_pFreeLink的索引，类似list的iterator用法
+	unsigned int			m_uMaxConnCount;
+	CTcpConnection			*m_pTcpConnection;		// 所有的网络连接
+	CTcpConnection			**m_pFreeConn;			// 当前处理空闲状态的CNetLink索引数组
+	unsigned int			m_uFreeConnIndex;		// m_pFreeLink的索引，类似list的iterator用法
 
 	unsigned int			m_uClientRecvBuffSize;
 	unsigned int			m_uClientSendBuffSize;
+
+	unsigned int			m_uSleepFrame;
+	bool					m_bRunning;
 private:
-	int						SetNoBlocking(CNetworkConection *pNetLink);
+	int						SetNoBlocking(CTcpConnection *pNetLink);
 	bool					AcceptClient(const SOCKET nNewSocket);
 
 	bool					DelClient(const unsigned int nNetworkIndex);
@@ -40,24 +43,16 @@ public:
 										unsigned short usPort,
 										void *lpParam,
 										CALLBACK_SERVER_EVENT pfnConnectCallBack,
-										CALLBACK_SERVER_EVENT pfnDisconnectCallBack,
-										unsigned int uLinkNum,
+										unsigned int uConnectionNum,
 										unsigned int uSendBufferLen,
 										unsigned int uRecvBufferLen,
 										unsigned int uTempSendBufferLen,
-										unsigned int uTempRecvBufferLen
+										unsigned int uTempRecvBufferLen,
+										const bool bThread,
+										const unsigned int uSleepFrame
 										);
+	void					Stop();
 	void					Release();
-	int						SendData(const unsigned int uConnID, const void *pData, const unsigned int uLength);
-	const void				*GetPackFromClient(const unsigned int uConnID, unsigned int &uLength);
-	inline const char		*GetClientIP(const unsigned int uConnID)
-	{
-		if (uConnID >= m_uMaxClientCount)
-			return NULL;
-
-		return m_pLinkList[uConnID].GetIP();
-	}
-	bool					ShutdownClient(const unsigned int uConnID);
 	void					CloseAcceptor();
 	void					DoNetworkAction();
 };

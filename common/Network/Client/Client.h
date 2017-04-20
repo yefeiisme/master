@@ -12,16 +12,16 @@ private:
 	fd_set					m_ErrorSet;
 
 	unsigned int			m_uMaxLinkCount;
-	CNetworkConection		*m_pLinkList;
-	CNetworkConection		**m_pFreeLink;			// 当前处理空闲状态的CNetLink索引数组
+	CTcpConnection			*m_pLinkList;
+	CTcpConnection			**m_pFreeLink;			// 当前处理空闲状态的CNetLink索引数组
 	int						m_nFreeLinkIndex;		// m_pFreeLink的索引，类似list的iterator用法
 
 	unsigned int			m_uRecvBufSize;
 	unsigned int			m_uSendBufSize;
 
-	CALLBACK_CLIENT_EVENT	m_pConnectedFun;
-	CALLBACK_CLIENT_EVENT	m_pDisconnectFun;
 	void					*m_pFunParam;
+
+	bool					m_bRunning;
 public:
 	CClientNetwork();
 	~CClientNetwork();
@@ -33,19 +33,20 @@ public:
 										unsigned int uTempSendBuffLen,
 										unsigned int uTempRecvBuffLen,
 										void *lpParm,
-										CALLBACK_CLIENT_EVENT pfnConnected,
-										CALLBACK_CLIENT_EVENT pfnDisconnect
+										const bool bThread,
+										const unsigned int uThreadFrame
 										);
+	inline void				Stop()
+	{
+		m_bRunning	= false;
+	}
 	void					Release();
-	bool					ConnectTo(char *strAddr, const unsigned short usPort);
-	void					Disconnect(const unsigned int uConnID);
-	int						SendPackToServer(const unsigned int uConnID, const void *pData, const unsigned int uLength);
-	const void				*GetPackFromServer(const unsigned int uConnID, unsigned int &uLength);
+	ITcpConnection			*ConnectTo(char *strAddr, const unsigned short usPort);
 	void					DoNetworkAction();
 private:
-	void					ProcessConnectedLink(CNetworkConection *pNetLink);
-	void					ProcessWaitConnectLink(CNetworkConection *pNetLink);
-	void					CloseNetLink(CNetworkConection *pNetLink);
+	void					ProcessConnectedLink(CTcpConnection *pNetLink);
+	void					ProcessWaitConnectLink(CTcpConnection *pNetLink);
+	void					CloseNetLink(CTcpConnection *pNetLink);
 };
 
 #endif

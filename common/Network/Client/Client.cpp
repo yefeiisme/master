@@ -10,20 +10,24 @@
 
 CClientNetwork::CClientNetwork()
 {
-	m_uMaxLinkCount	= 0;
+	FD_ZERO(&m_ReadSet);
+	FD_ZERO(&m_WriteSet);
+	FD_ZERO(&m_ErrorSet);
+
+	m_uMaxLinkCount		= 0;
 	m_pLinkList			= NULL;
 	m_pFreeLink			= NULL;
 	m_nFreeLinkIndex	= 0;
 
 	m_uRecvBufSize		= 0;
 	m_uSendBufSize		= 0;
-	m_pConnectedFun		= NULL;
-	m_pDisconnectFun	= NULL;
+
+	m_bRunning			= false;
 }
 
 CClientNetwork::~CClientNetwork()
 {
-	for( int nIndex = 0; nIndex < m_uMaxLinkCount; ++nIndex )
+	for (int nIndex = 0; nIndex < m_uMaxLinkCount; ++nIndex)
 	{
 		if (!m_pLinkList[nIndex].IsDisconnected())
 			m_pLinkList[nIndex].Disconnect();
@@ -36,8 +40,10 @@ CClientNetwork::~CClientNetwork()
 
 	m_uRecvBufSize		= 0;
 	m_uSendBufSize		= 0;
-	m_pConnectedFun		= NULL;
-	m_pDisconnectFun	= NULL;
+
+#if defined(WIN32) || defined(WIN64)
+	WSACleanup();
+#endif
 }
 
 bool CClientNetwork::Initialize(
@@ -47,14 +53,15 @@ bool CClientNetwork::Initialize(
 	unsigned int uTempSendBuffLen,
 	unsigned int uTempRecvBuffLen,
 	void *lpParm,
-	CALLBACK_CLIENT_EVENT pfnConnected,
-	CALLBACK_CLIENT_EVENT pfnDisconnect)
+	const bool bThread,
+	const unsigned int uThreadFrame
+	)
 {
 	m_uMaxLinkCount	= uClientCount;
-	m_uRecvBufSize		= uRecvBuffLen;
-	m_uSendBufSize		= uSendBuffLen;
+	m_uRecvBufSize	= uRecvBuffLen;
+	m_uSendBufSize	= uSendBuffLen;
 
-#ifdef WIN32
+#if defined(WIN32) || defined(WIN64)
 	WSADATA	wsaData;
 	WORD	wVersionRequested	= MAKEWORD(2, 2);
 	int		nError				= WSAStartup(wVersionRequested, &wsaData);
@@ -63,11 +70,11 @@ bool CClientNetwork::Initialize(
 		return false;
 #endif
 
-	m_pLinkList = new CNetworkConection[m_uMaxLinkCount];
+	m_pLinkList = new CTcpConnection[m_uMaxLinkCount];
 	if (NULL == m_pLinkList)
 		return false;
 
-	m_pFreeLink	= new CNetworkConection*[m_uMaxLinkCount];
+	m_pFreeLink	= new CTcpConnection*[m_uMaxLinkCount];
 	if (NULL == m_pFreeLink)
 		return false;
 
@@ -81,26 +88,27 @@ bool CClientNetwork::Initialize(
 		m_pFreeLink[uiIndex]			= &m_pLinkList[uiIndex];
 	}
 
-	m_pConnectedFun		= pfnConnected;
-	m_pDisconnectFun	= pfnDisconnect;
-	m_pFunParam			= lpParm;
+	m_pFunParam	= lpParm;
+
+	if (bThread)
+	{
+		// 开启线程，执行DoNetworkAction
+		// ...
+		m_bRunning	= true;
+	}
 
 	return true;
 }
 
 void CClientNetwork::Release()
 {
-#ifdef WIN32
-	WSACleanup();
-#endif
-
 	delete this;
 }
 
-bool CClientNetwork::ConnectTo(char* strAddress, const unsigned short usPort)
+ITcpConnection *CClientNetwork::ConnectTo(char* strAddress, const unsigned short usPort)
 {
 	if (m_nFreeLinkIndex >= m_uMaxLinkCount)
-		return false;
+		return NULL;
 
 	addrinfo tagAddInfo;
 	memset(&tagAddInfo,0,sizeof(tagAddInfo));
@@ -118,7 +126,7 @@ bool CClientNetwork::ConnectTo(char* strAddress, const unsigned short usPort)
 	if (0 != retVal)
 	{
 		g_pFileLog->WriteLog("[%s][%d] getaddrinfo For IP Type Error\n", __FILE__, __LINE__);
-		return false;
+		return NULL;
 	}
 
 	for (pRes = pNetAddr; pRes != NULL; pRes = pRes->ai_next)
@@ -132,10 +140,8 @@ bool CClientNetwork::ConnectTo(char* strAddress, const unsigned short usPort)
 			int nNewSock = socket(AF_INET6, SOCK_STREAM, 0);
 			if (nNewSock < 0)
 			{
-#if defined(WIN32) || defined(_linux)
 				g_pFileLog->WriteLog("socket failed,sock = %d\n", nNewSock);
-#endif
-				return false;
+				return NULL;
 			}
 
 			sockaddr_in6 tagAddrIn;
@@ -144,62 +150,53 @@ bool CClientNetwork::ConnectTo(char* strAddress, const unsigned short usPort)
 			tagAddrIn.sin6_port		= htons(usPort);
 			if (inet_pton(AF_INET6, strBuffer, &tagAddrIn.sin6_addr) < 0)
 			{
-#if defined(WIN32) || defined(_linux)
 				g_pFileLog->WriteLog("inet_pton Error\n");
-#endif
-				return false;
+				return NULL;
 			}
 
 			int nRet = connect(nNewSock, (sockaddr*)&tagAddrIn, sizeof(tagAddrIn));
 			if (0 == nRet)
 			{
-				CNetworkConection	*pNewLink = m_pFreeLink[m_nFreeLinkIndex];
-
-				if (!pNewLink->ReInit(nNewSock, true))
-					return false;
+				CTcpConnection	*pNewLink = m_pFreeLink[m_nFreeLinkIndex];
 
 				++m_nFreeLinkIndex;
+
+				pNewLink->ReInit(nNewSock, true);
 
 				pNewLink->Connected();
 
-				m_pConnectedFun(m_pFunParam, pNewLink->m_uConnID);
-
-				return true;
+				return pNewLink;
 			}
-#ifdef WIN32
+#if defined(WIN32) || defined(WIN64)
 			else if (WSAGetLastError() == WSAEWOULDBLOCK)
-#else
+#elif defined(__linux)
 			else if (EINPROGRESS == errno)
+#elif defined(__APPLE__)
 #endif
 			{
-				CNetworkConection	*pNewLink = m_pFreeLink[m_nFreeLinkIndex];
-
-				if (!pNewLink->ReInit(nNewSock, true))
-					return false;
+				CTcpConnection	*pNewLink = m_pFreeLink[m_nFreeLinkIndex];
 
 				++m_nFreeLinkIndex;
 
+				pNewLink->ReInit(nNewSock, true);
+
 				pNewLink->WaitConnect();
 
-				return true;
+				return pNewLink;
 			}
 			else
 			{
 				closesocket(nNewSock);
-				return false;
+				return NULL;
 			}
-
-			return true;
 		}
 		else if (AF_INET == pRes->ai_addr->sa_family)
 		{
 			int	nNewSock = socket(AF_INET, SOCK_STREAM, 0);
 			if (nNewSock < 0)
 			{
-#if defined(WIN32) || defined(_linux)
 				g_pFileLog->WriteLog("socket failed,sock = %d\n", nNewSock);
-#endif
-				return false;
+				return NULL;
 			}
 
 			// make it nonblock
@@ -230,76 +227,42 @@ bool CClientNetwork::ConnectTo(char* strAddress, const unsigned short usPort)
 			int nRet = connect(nNewSock, (sockaddr*)&tagAddrIn, sizeof(tagAddrIn));
 			if (0 == nRet)
 			{
-				CNetworkConection	*pNewLink = m_pFreeLink[m_nFreeLinkIndex];
-
-				if (!pNewLink->ReInit(nNewSock))
-					return false;
+				CTcpConnection	*pNewLink = m_pFreeLink[m_nFreeLinkIndex];
 
 				++m_nFreeLinkIndex;
+
+				pNewLink->ReInit(nNewSock);
 
 				pNewLink->Connected();
 
-				m_pConnectedFun(m_pFunParam, pNewLink->m_uConnID);
-
-				return true;
+				return pNewLink;
 			}
-#ifdef WIN32
+#if defined(WIN32) || defined(WIN64)
 			else if (WSAGetLastError() == WSAEWOULDBLOCK)
-#else
+#elif defined(__linux)
 			else if (EINPROGRESS == errno)
+#elif defined(__APPLE__)
 #endif
 			{
-				CNetworkConection	*pNewLink = m_pFreeLink[m_nFreeLinkIndex];
-
-				if (!pNewLink->ReInit(nNewSock))
-					return false;
+				CTcpConnection	*pNewLink = m_pFreeLink[m_nFreeLinkIndex];
 
 				++m_nFreeLinkIndex;
 
+				pNewLink->ReInit(nNewSock);
+
 				pNewLink->WaitConnect();
 
-				return true;
+				return pNewLink;
 			}
 			else
 			{
 				closesocket(nNewSock);
-				return false;
+				return NULL;
 			}
-
-			return true;
 		}
 	}
 
-	return false;
-}
-
-void CClientNetwork::Disconnect(const unsigned int uiConnID)
-{
-	if (uiConnID >= m_uMaxLinkCount)
-		return;
-
-	if (!m_pLinkList[uiConnID].Disconnect())
-		return;
-
-	m_pFreeLink[--m_nFreeLinkIndex]	= &m_pLinkList[uiConnID];
-
-	m_pDisconnectFun(m_pFunParam, uiConnID);
-}
-
-int CClientNetwork::SendPackToServer(const unsigned int uiConnID, const void *pData, const unsigned int uiLength)
-{
-	if (uiConnID >= m_uMaxLinkCount)
-		return -1;
-
-	return m_pLinkList[uiConnID].PutPack(pData, uiLength);
-}
-
-const void *CClientNetwork::GetPackFromServer(const unsigned int uiConnID, unsigned int &uiLength)
-{
-	if (uiConnID >= m_uMaxLinkCount)
-		return NULL;
-
-	return m_pLinkList[uiConnID].GetPack(uiLength);
+	return NULL;
 }
 
 void CClientNetwork::DoNetworkAction()
@@ -317,7 +280,7 @@ void CClientNetwork::DoNetworkAction()
 	}
 }
 
-void CClientNetwork::ProcessConnectedLink(CNetworkConection *pNetLink)
+void CClientNetwork::ProcessConnectedLink(CTcpConnection *pNetLink)
 {
 	timeval	timeout	= {0, 0};
 
@@ -356,7 +319,7 @@ void CClientNetwork::ProcessConnectedLink(CNetworkConection *pNetLink)
 	}
 }
 
-void CClientNetwork::ProcessWaitConnectLink(CNetworkConection *pNetLink)
+void CClientNetwork::ProcessWaitConnectLink(CTcpConnection *pNetLink)
 {
 	timeval	timeout	= {0, 0};
 
@@ -374,16 +337,18 @@ void CClientNetwork::ProcessWaitConnectLink(CNetworkConection *pNetLink)
 
 	int nError = 0;
 	socklen_t len = sizeof(nError);
-#ifdef WIN32
+#if defined(WIN32) || defined(WIN64)
 	if (getsockopt(pNetLink->m_nSock, SOL_SOCKET, SO_ERROR, (char*)&nError, &len) < 0)
-#else
+#elif defined(__linux)
 	if (getsockopt(pNetLink->m_nSock, SOL_SOCKET, SO_ERROR, &nError, &len) < 0)
+#elif defined(__APPLE__)
 #endif
 	{
-#ifdef WIN32
+#if defined(WIN32) || defined(WIN64)
 		g_pFileLog->WriteLog("getsockopt Failed errno=%d\n", WSAGetLastError());
-#else
+#elif defined(__linux)
 		g_pFileLog->WriteLog("getsockopt Failed errno=%d\n", errno);
+#elif defined(__APPLE__)
 #endif
 		closesocket(pNetLink->m_nSock);
 		m_pFreeLink[--m_nFreeLinkIndex]	= pNetLink;
@@ -392,16 +357,17 @@ void CClientNetwork::ProcessWaitConnectLink(CNetworkConection *pNetLink)
 
 	if (nError != 0)
 	{
-#ifdef WIN32
+#if defined(WIN32) || defined(WIN64)
 		g_pFileLog->WriteLog("Connnect Failed errno=%d\n", WSAGetLastError());
-#else
+#elif defined(__linux)
 		g_pFileLog->WriteLog("Connnect Failed errno=%d\n", errno);
+#elif defined(__APPLE__)
 #endif
 		closesocket(pNetLink->m_nSock);
 		m_pFreeLink[--m_nFreeLinkIndex]	= pNetLink;
 		return;
 	}
-#ifdef WIN32
+#if defined(WIN32) || defined(WIN64)
 	unsigned long ulNonBlock = 1;
 	if (ioctlsocket(pNetLink->m_nSock, FIONBIO, &ulNonBlock) == SOCKET_ERROR)
 	{
@@ -410,7 +376,7 @@ void CClientNetwork::ProcessWaitConnectLink(CNetworkConection *pNetLink)
 		m_pFreeLink[--m_nFreeLinkIndex]	= pNetLink;
 		return;
 	}
-#else
+#elif defined(__linux)
 	int nFlags = fcntl(pNetLink->m_nSock, F_GETFL, 0);
 	if (nFlags < 0 || fcntl(pNetLink->m_nSock, F_SETFL, nFlags | O_NONBLOCK | O_ASYNC ) < 0)
 	{
@@ -419,20 +385,19 @@ void CClientNetwork::ProcessWaitConnectLink(CNetworkConection *pNetLink)
 		m_pFreeLink[--m_nFreeLinkIndex]	= pNetLink;
 		return;
 	}
+#elif defined(__APPLE__)
 #endif
 
 	pNetLink->Connected();
-	m_pConnectedFun(m_pFunParam, pNetLink->m_uConnID);
 }
 
-void CClientNetwork::CloseNetLink(CNetworkConection *pNetLink)
+void CClientNetwork::CloseNetLink(CTcpConnection *pNetLink)
 {
-	if (!pNetLink->Disconnect())
-		return;
+	pNetLink->Disconnect();
 
 	m_pFreeLink[--m_nFreeLinkIndex]	= pNetLink;
 
-	m_pDisconnectFun(m_pFunParam, pNetLink->m_uConnID);
+	//m_pDisconnectFun(m_pFunParam, pNetLink->m_uConnID);
 }
 
 IClientNetwork *CreateClientNetwork(
@@ -442,15 +407,15 @@ IClientNetwork *CreateClientNetwork(
 	unsigned int uMaxTempSendBuff,
 	unsigned int uMaxTempReceiveBuff,
 	void *lpParm,
-	CALLBACK_CLIENT_EVENT pfnConnected,
-	CALLBACK_CLIENT_EVENT pfnDisconnect
+	const bool bThread,
+	const unsigned int uSleepFrame
 	)
 {
 	CClientNetwork	*pClient = new CClientNetwork();
 	if (NULL == pClient)
 		return NULL;
 
-	if (!pClient->Initialize(uLinkCount, uMaxSendBuff, uMaxReceiveBuff, uMaxTempSendBuff, uMaxTempReceiveBuff, lpParm, pfnConnected, pfnDisconnect))
+	if (!pClient->Initialize(uLinkCount, uMaxSendBuff, uMaxReceiveBuff, uMaxTempSendBuff, uMaxTempReceiveBuff, lpParm, bThread, uSleepFrame))
 	{
 		pClient->Release();
 		return NULL;

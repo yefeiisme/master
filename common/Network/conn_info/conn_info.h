@@ -1,6 +1,7 @@
 #ifndef __NET_LINK_H_
 #define __NET_LINK_H_
 
+#include "INetwork.h"
 #include "../NetworkHead.h"
 #define MAX_IP_LEN	128
 
@@ -11,7 +12,7 @@ enum E_NET_LINK_STATE
 	NET_LINK_STATE_WAI_CONNECT,
 };
 
-class CNetworkConection
+class CTcpConnection : public ITcpConnection
 {
 public:
 	SOCKET						m_nSock;
@@ -38,10 +39,18 @@ private:
 	unsigned int				m_uTempRecvBufLen;
 	/**********************接收缓冲区**********************/
 
-	bool						m_bIPV6;
+	bool						m_bSocketConnected;		// 网络连接是否连接状态
+	bool						m_bLogicConnected;		// 外部逻辑是否连接状态
+	bool						m_bConnectSuccess;		// 异步连接是否完成
+	bool						m_bIPV6;				// 是否是IPV6网络地址
 public:
-	CNetworkConection();
-	~CNetworkConection();
+	CTcpConnection();
+	~CTcpConnection();
+
+	inline bool					IsConnectSuccess()
+	{
+		return m_bConnectSuccess;
+	}
 
 	inline bool					IsConnect()
 	{
@@ -59,14 +68,21 @@ public:
 	}
 
 	bool						Initialize(unsigned int uRecvBufferLen, unsigned int uSendBufferLen, unsigned int uTempRecvBufLen, unsigned int uTempSendBufLen);
-	bool						ReInit(const int nSocket, const bool bIPV6 = false);
+	inline void					ReInit(const int nSocket, const bool bIPV6 = false)
+	{
+		m_pUnreleased	= m_pRecv = m_pPack = m_pRecvBuf;
+		m_pFlush		= m_pSend = m_pSendBuf;
+		m_nSock			= nSocket;
+		m_bIPV6			= bIPV6;
+	}
+
 	const char					*GetIP();
 
 	int							RecvData();
 	int							FlushData();
-	int							PutPack(const void *pPack, unsigned int uPackLen);
+	bool						PutPack(const void *pPack, unsigned int uPackLen);
 	const void					*GetPack(unsigned int &uPackLen);
-	bool						Disconnect();
+	void						Disconnect();
 	inline void					WaitConnect()
 	{
 		m_eStatus	= NET_LINK_STATE_WAI_CONNECT;
