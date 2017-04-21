@@ -39,7 +39,7 @@ private:
 	unsigned int				m_uTempRecvBufLen;
 	/**********************接收缓冲区**********************/
 
-	bool						m_bSocketConnected;		// 网络连接是否连接状态
+	bool						m_bTcpConnected;		// 网络连接是否连接状态
 	bool						m_bLogicConnected;		// 外部逻辑是否连接状态
 	bool						m_bConnectSuccess;		// 异步连接是否完成
 	bool						m_bIPV6;				// 是否是IPV6网络地址
@@ -49,7 +49,7 @@ public:
 
 	inline bool					IsSocketConnected()
 	{
-		return m_bSocketConnected;
+		return m_bTcpConnected;
 	}
 
 	inline bool					IsLogicConnected()
@@ -99,13 +99,26 @@ public:
 	}
 
 	void						Disconnect();
-	inline void					WaitConnect()
+
+	inline void					TcpConnected()
 	{
-		m_eStatus	= NET_LINK_STATE_WAI_CONNECT;
+		m_bTcpConnected	= true;
 	}
-	inline void					Connected()
+
+	inline void					ConnectSuccess()
 	{
-		m_eStatus	= NET_LINK_STATE_CONNECT;
+		m_bConnectSuccess	= true;
+	}
+
+	inline void					LogicConnected()
+	{
+		m_bLogicConnected	= true;
+	}
+
+	inline void					AllConnected()
+	{
+		m_bTcpConnected	= true;
+		m_bLogicConnected	= true;
 	}
 };
 

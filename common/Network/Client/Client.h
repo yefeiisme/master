@@ -1,8 +1,11 @@
 #ifndef _ICLIENT_H_
 #define _ICLIENT_H_
 
-class CClientNetwork;
-class IClientNetwork;
+#include "INetwork.h"
+#include <list>
+using namespace std;
+
+class CTcpConnection;
 
 class CClientNetwork : public IClientNetwork
 {
@@ -11,15 +14,21 @@ private:
 	fd_set					m_WriteSet;
 	fd_set					m_ErrorSet;
 
-	unsigned int			m_uMaxLinkCount;
-	CTcpConnection			*m_pLinkList;
-	CTcpConnection			**m_pFreeLink;			// 当前处理空闲状态的CNetLink索引数组
-	int						m_nFreeLinkIndex;		// m_pFreeLink的索引，类似list的iterator用法
+	unsigned int			m_uMaxConnCount;
+	CTcpConnection			*m_pConnList;
+	CTcpConnection			**m_pFreeConn;			// 当前处理空闲状态的CNetLink索引数组
+	unsigned int			m_uFreeConnIndex;		// m_pFreeLink的索引，类似list的iterator用法
 
 	unsigned int			m_uRecvBufSize;
 	unsigned int			m_uSendBufSize;
 
 	void					*m_pFunParam;
+
+	// 暂时先用这个list，后面改为TList
+	// ...
+	list<CTcpConnection*>	m_listActiveConn;
+	list<CTcpConnection*>	m_listWaitConnectedConn;
+	list<CTcpConnection*>	m_listCloseWaitConn;
 
 	bool					m_bRunning;
 public:
@@ -44,9 +53,21 @@ public:
 	ITcpConnection			*ConnectTo(char *strAddr, const unsigned short usPort);
 	void					DoNetworkAction();
 private:
-	void					ProcessConnectedLink(CTcpConnection *pNetLink);
-	void					ProcessWaitConnectLink(CTcpConnection *pNetLink);
-	void					CloseNetLink(CTcpConnection *pNetLink);
+	inline void				AddAvailableConnection(CTcpConnection *pConnection)
+	{
+		if (m_uFreeConnIndex)
+		{
+			m_pFreeConn[--m_uFreeConnIndex]	= pConnection;
+		}
+	}
+
+	int						SetNoBlocking(CTcpConnection *pTcpConnection);
+	void					RemoveConnection(CTcpConnection *pTcpConnection);
+
+	void					ProcessConnectedConnection();
+	void					ProcessWaitConnectConnection();
+	void					ProcessWaitCloseConnection();
+	bool					IsConnectSuccess(CTcpConnection *pNetLink);
 };
 
 #endif

@@ -23,7 +23,7 @@ CTcpConnection::CTcpConnection()
 	m_uRecvBufLen		= 0;
 	m_uTempRecvBufLen	= 0;
 
-	m_bSocketConnected	= false;
+	m_bTcpConnected		= false;
 	m_bLogicConnected	= false;
 	m_bConnectSuccess	= false;
 	m_bIPV6				= false;
@@ -119,7 +119,7 @@ const char *CTcpConnection::GetIP()
 
 int CTcpConnection::RecvData()
 {
-	if (!m_bSocketConnected)
+	if (!m_bTcpConnected)
 		return 0;
 
 	char	*pRecvStart	= m_pRecv;
@@ -304,7 +304,7 @@ const void *CTcpConnection::GetPack(unsigned int &uPackLen)
 
 bool CTcpConnection::PutPack(const void* pPack, unsigned int uPackLen)
 {
-	if (!m_bSocketConnected)
+	if (!m_bTcpConnected)
 		return false;
 
 	char	*pPutStart	= m_pSend;
@@ -456,7 +456,7 @@ int CTcpConnection::SendData()
 
 void CTcpConnection::Disconnect()
 {
-	m_bSocketConnected	= false;
+	m_bTcpConnected		= false;
 	m_bConnectSuccess	= false;
 
 	if (INVALID_SOCKET != m_nSock)

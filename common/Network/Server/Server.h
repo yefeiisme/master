@@ -52,9 +52,10 @@ private:
 	}
 
 	int						SetNoBlocking(CTcpConnection *pTcpConnection);
-	bool					AcceptClient(const SOCKET nNewSocket);
+	void					AcceptClient(const SOCKET nNewSocket);
 
-	bool					DelClient(CTcpConnection *pTcpConnection);
+	void					RemoveConnection(CTcpConnection *pTcpConnection);
+	void					CloseConnection(CTcpConnection *pTcpConnection);
 	void					ReadAction();
 	void					WriteAction();
 	void					CloseAction();

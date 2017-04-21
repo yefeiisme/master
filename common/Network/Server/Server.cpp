@@ -84,22 +84,22 @@ int CServerNetwork::SetNoBlocking(CTcpConnection *pTcpConnection)
 #endif
 }
 
-bool CServerNetwork::AcceptClient(const SOCKET nNewSocket)
+void CServerNetwork::AcceptClient(const SOCKET nNewSocket)
 {
 	CTcpConnection	*pNewLink	= GetNewConnection();
 	if (NULL == pNewLink)
 	{
 		closesocket(nNewSocket);
-		return false;
+		return;
 	}
 
 	pNewLink->ReInit(nNewSocket);
 
-	pNewLink->Connected();
+	pNewLink->TcpConnected();
 
 	if (-1 == SetNoBlocking(pNewLink))
 	{
-		DelClient(pNewLink);
+		RemoveConnection(pNewLink);
 
 #if defined(WIN32) || defined(WIN64)
 		g_pFileLog->WriteLog("ioctlsocket() failed with error %d\n", WSAGetLastError());
@@ -108,24 +108,16 @@ bool CServerNetwork::AcceptClient(const SOCKET nNewSocket)
 #elif defined(__APPLE__)
 #endif
 
-		return false;
+		return;
 	}
 
 	m_listActiveConn.push_back(pNewLink);
 
 	m_pfnConnectCallBack(m_pFunParam, pNewLink);
-
-	return true;
 }
 
-bool CServerNetwork::DelClient(CTcpConnection *pTcpConnection)
+void CServerNetwork::RemoveConnection(CTcpConnection *pTcpConnection)
 {
-	if (NULL == pTcpConnection)
-		return false;
-
-	if (!pTcpConnection->IsConnect())
-		return false;
-
 #if defined(__linux)
 	int ret = epoll_ctl(m_nepfd, EPOLL_CTL_DEL, pTcpConnection->m_nSock, NULL);
 #elif defined(__APPLE__)
@@ -133,8 +125,17 @@ bool CServerNetwork::DelClient(CTcpConnection *pTcpConnection)
 	pTcpConnection->Disconnect();
 
 	AddAvailableConnection(pTcpConnection);
+}
 
-	return true;
+void CServerNetwork::CloseConnection(CTcpConnection *pTcpConnection)
+{
+#if defined(__linux)
+	int ret = epoll_ctl(m_nepfd, EPOLL_CTL_DEL, pTcpConnection->m_nSock, NULL);
+#elif defined(__APPLE__)
+#endif
+	pTcpConnection->Disconnect();
+
+	m_listCloseWaitConn.push_back(pTcpConnection);
 }
 
 #if defined(WIN32) || defined(WIN64)
@@ -160,30 +161,40 @@ void CServerNetwork::ReadAction()
 		}
 	}
 
-	for (int nIndex = 0; nIndex < m_uMaxConnCount; ++nIndex)
+	CTcpConnection	*pTcpConnection	= NULL;
+
+	for (list<CTcpConnection*>::iterator Iter = m_listActiveConn.begin(); Iter != m_listActiveConn.end();)
 	{
-		if (m_pTcpConnection[nIndex].IsDisconnected())
-			continue;
+		pTcpConnection	= *Iter;
 
 		FD_ZERO(&m_ReadSet);
 		FD_ZERO(&m_ErrorSet);
 
-		FD_SET(m_pTcpConnection[nIndex].m_nSock, &m_ReadSet);
-		FD_SET(m_pTcpConnection[nIndex].m_nSock, &m_ErrorSet);
+		FD_SET(pTcpConnection->m_nSock, &m_ReadSet);
+		FD_SET(pTcpConnection->m_nSock, &m_ErrorSet);
 
 		if (select(0, &m_ReadSet, NULL, &m_ErrorSet, &timeout) <= 0)
-			continue;
-
-		if (FD_ISSET(m_pTcpConnection[nIndex].m_nSock, &m_ReadSet))
 		{
-			if (m_pTcpConnection[nIndex].RecvData() == -1)
+			++Iter;
+			continue;
+		}
+
+		if (FD_ISSET(pTcpConnection->m_nSock, &m_ReadSet))
+		{
+			if (pTcpConnection->RecvData() == -1)
 			{
-				DelClient(&m_pTcpConnection[nIndex]);
+				CloseConnection(pTcpConnection);
+				Iter	= m_listActiveConn.erase(Iter);
 			}
 		}
-		else if (FD_ISSET(m_pTcpConnection[nIndex].m_nSock, &m_ErrorSet))
+		else if (FD_ISSET(pTcpConnection->m_nSock, &m_ErrorSet))
 		{
-			DelClient(&m_pTcpConnection[nIndex]);
+			CloseConnection(pTcpConnection);
+			Iter	= m_listActiveConn.erase(Iter);
+		}
+		else
+		{
+			++Iter;
 		}
 	}
 }
@@ -218,7 +229,7 @@ void CServerNetwork::ReadAction()
 		{
 			if (pNetLink->RecvData() == -1)
 			{
-				DelClient(pNetLink);
+				CloseConnection(pNetLink);
 			}
 		}
 		else if (wv[nLoopCount].events & EPOLLPRI)
@@ -228,12 +239,12 @@ void CServerNetwork::ReadAction()
 		}
 		else if (wv[nLoopCount].events & EPOLLHUP)
 		{
-			DelClient(pNetLink);
+			CloseConnection(pNetLink);
 		}
 		else if (wv[nLoopCount].events & EPOLLERR)
 		{
 			// error
-			DelClient(pNetLink);
+			CloseConnection(pNetLink);
 		}
 	}
 }
@@ -248,20 +259,16 @@ void CServerNetwork::WriteAction()
 		pTcpConnection	= *Iter;
 		if (!pTcpConnection->IsLogicConnected())
 		{
-			DelClient(pTcpConnection);
+			// 逻辑层已经退出了，这里只需要将TcpConnect从Active中移除OK了
+			RemoveConnection(pTcpConnection);
 			Iter	= m_listActiveConn.erase(Iter);
 			continue;
 		}
 
 		if (pTcpConnection->SendData() == -1)
 		{
-#if defined(__linux)
-			int ret = epoll_ctl(m_nepfd, EPOLL_CTL_DEL, pTcpConnection->m_nSock, NULL);
-#elif defined(__APPLE__)
-#endif
-			pTcpConnection->Disconnect();
-
-			m_listCloseWaitConn.push_back(pTcpConnection);
+			// 网络层异常，关闭网络相关操作，放入等待队列中，等待逻辑层退出
+			CloseConnection(pTcpConnection);
 			Iter	= m_listActiveConn.erase(Iter);
 			continue;
 		}

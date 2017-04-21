@@ -14,29 +14,33 @@ CClientNetwork::CClientNetwork()
 	FD_ZERO(&m_WriteSet);
 	FD_ZERO(&m_ErrorSet);
 
-	m_uMaxLinkCount		= 0;
-	m_pLinkList			= NULL;
-	m_pFreeLink			= NULL;
-	m_nFreeLinkIndex	= 0;
+	m_uMaxConnCount		= 0;
+	m_pConnList			= NULL;
+	m_pFreeConn			= NULL;
+	m_uFreeConnIndex	= 0;
 
 	m_uRecvBufSize		= 0;
 	m_uSendBufSize		= 0;
+
+	m_listActiveConn.clear();
+	m_listWaitConnectedConn.clear();
+	m_listCloseWaitConn.clear();
 
 	m_bRunning			= false;
 }
 
 CClientNetwork::~CClientNetwork()
 {
-	for (int nIndex = 0; nIndex < m_uMaxLinkCount; ++nIndex)
+	for (int nIndex = 0; nIndex < m_uMaxConnCount; ++nIndex)
 	{
-		m_pLinkList[nIndex].ShutDown();
-		m_pLinkList[nIndex].Disconnect();
+		m_pConnList[nIndex].ShutDown();
+		m_pConnList[nIndex].Disconnect();
 	}
 
-	SAFE_DELETE_ARR(m_pLinkList);
-	m_uMaxLinkCount	= 0;
-	SAFE_DELETE_ARR(m_pFreeLink);
-	m_nFreeLinkIndex	= 0;
+	SAFE_DELETE_ARR(m_pConnList);
+	m_uMaxConnCount	= 0;
+	SAFE_DELETE_ARR(m_pFreeConn);
+	m_uFreeConnIndex	= 0;
 
 	m_uRecvBufSize		= 0;
 	m_uSendBufSize		= 0;
@@ -57,7 +61,7 @@ bool CClientNetwork::Initialize(
 	const unsigned int uThreadFrame
 	)
 {
-	m_uMaxLinkCount	= uClientCount;
+	m_uMaxConnCount	= uClientCount;
 	m_uRecvBufSize	= uRecvBuffLen;
 	m_uSendBufSize	= uSendBuffLen;
 
@@ -70,22 +74,22 @@ bool CClientNetwork::Initialize(
 		return false;
 #endif
 
-	m_pLinkList = new CTcpConnection[m_uMaxLinkCount];
-	if (NULL == m_pLinkList)
+	m_pConnList = new CTcpConnection[m_uMaxConnCount];
+	if (NULL == m_pConnList)
 		return false;
 
-	m_pFreeLink	= new CTcpConnection*[m_uMaxLinkCount];
-	if (NULL == m_pFreeLink)
+	m_pFreeConn	= new CTcpConnection*[m_uMaxConnCount];
+	if (NULL == m_pFreeConn)
 		return false;
 
-	for (unsigned int uiIndex = 0; uiIndex < m_uMaxLinkCount; ++uiIndex)
+	for (unsigned int uiIndex = 0; uiIndex < m_uMaxConnCount; ++uiIndex)
 	{
-		if (!m_pLinkList[uiIndex].Initialize(m_uRecvBufSize, m_uSendBufSize, uTempRecvBuffLen, uTempSendBuffLen))
+		if (!m_pConnList[uiIndex].Initialize(m_uRecvBufSize, m_uSendBufSize, uTempRecvBuffLen, uTempSendBuffLen))
 			return false;
 
-		m_pLinkList[uiIndex].m_uConnID	= uiIndex;
+		m_pConnList[uiIndex].m_uConnID	= uiIndex;
 
-		m_pFreeLink[uiIndex]			= &m_pLinkList[uiIndex];
+		m_pFreeConn[uiIndex]			= &m_pConnList[uiIndex];
 	}
 
 	m_pFunParam	= lpParm;
@@ -107,7 +111,7 @@ void CClientNetwork::Release()
 
 ITcpConnection *CClientNetwork::ConnectTo(char* strAddress, const unsigned short usPort)
 {
-	if (m_nFreeLinkIndex >= m_uMaxLinkCount)
+	if (m_uFreeConnIndex >= m_uMaxConnCount)
 		return NULL;
 
 	addrinfo tagAddInfo;
@@ -157,13 +161,15 @@ ITcpConnection *CClientNetwork::ConnectTo(char* strAddress, const unsigned short
 			int nRet = connect(nNewSock, (sockaddr*)&tagAddrIn, sizeof(tagAddrIn));
 			if (0 == nRet)
 			{
-				CTcpConnection	*pNewLink = m_pFreeLink[m_nFreeLinkIndex];
+				CTcpConnection	*pNewLink = m_pFreeConn[m_uFreeConnIndex];
 
-				++m_nFreeLinkIndex;
+				++m_uFreeConnIndex;
 
 				pNewLink->ReInit(nNewSock, true);
 
-				pNewLink->Connected();
+				pNewLink->AllConnected();
+
+				m_listActiveConn.push_back(pNewLink);
 
 				return pNewLink;
 			}
@@ -174,13 +180,15 @@ ITcpConnection *CClientNetwork::ConnectTo(char* strAddress, const unsigned short
 #elif defined(__APPLE__)
 #endif
 			{
-				CTcpConnection	*pNewLink = m_pFreeLink[m_nFreeLinkIndex];
+				CTcpConnection	*pNewLink = m_pFreeConn[m_uFreeConnIndex];
 
-				++m_nFreeLinkIndex;
+				++m_uFreeConnIndex;
 
 				pNewLink->ReInit(nNewSock, true);
 
-				pNewLink->WaitConnect();
+				pNewLink->TcpConnected();
+
+				m_listWaitConnectedConn.push_back(pNewLink);
 
 				return pNewLink;
 			}
@@ -227,13 +235,15 @@ ITcpConnection *CClientNetwork::ConnectTo(char* strAddress, const unsigned short
 			int nRet = connect(nNewSock, (sockaddr*)&tagAddrIn, sizeof(tagAddrIn));
 			if (0 == nRet)
 			{
-				CTcpConnection	*pNewLink = m_pFreeLink[m_nFreeLinkIndex];
+				CTcpConnection	*pNewLink = m_pFreeConn[m_uFreeConnIndex];
 
-				++m_nFreeLinkIndex;
+				++m_uFreeConnIndex;
 
 				pNewLink->ReInit(nNewSock);
 
-				pNewLink->Connected();
+				pNewLink->AllConnected();
+
+				m_listActiveConn.push_back(pNewLink);
 
 				return pNewLink;
 			}
@@ -244,13 +254,15 @@ ITcpConnection *CClientNetwork::ConnectTo(char* strAddress, const unsigned short
 #elif defined(__APPLE__)
 #endif
 			{
-				CTcpConnection	*pNewLink = m_pFreeLink[m_nFreeLinkIndex];
+				CTcpConnection	*pNewLink = m_pFreeConn[m_uFreeConnIndex];
 
-				++m_nFreeLinkIndex;
+				++m_uFreeConnIndex;
 
 				pNewLink->ReInit(nNewSock);
 
-				pNewLink->WaitConnect();
+				pNewLink->TcpConnected();
+
+				m_listWaitConnectedConn.push_back(pNewLink);
 
 				return pNewLink;
 			}
@@ -267,80 +279,228 @@ ITcpConnection *CClientNetwork::ConnectTo(char* strAddress, const unsigned short
 
 void CClientNetwork::DoNetworkAction()
 {
-	for (unsigned int uiIndex = 0; uiIndex < m_uMaxLinkCount; ++uiIndex)
+	ProcessConnectedConnection();
+
+	ProcessWaitConnectConnection();
+
+	ProcessWaitCloseConnection();
+}
+
+int CClientNetwork::SetNoBlocking(CTcpConnection *pTcpConnection)
+{
+#if defined(WIN32) || defined(WIN64)
+	unsigned long ulNonBlock = 1;
+	return (ioctlsocket(pTcpConnection->m_nSock, FIONBIO, &ulNonBlock) == SOCKET_ERROR);
+#elif defined(__linux)
+	int nFlags = fcntl(pTcpConnection->m_nSock, F_GETFL, 0);
+	if (nFlags < 0 || fcntl(pTcpConnection->m_nSock, F_SETFL, nFlags | O_NONBLOCK | O_ASYNC) < 0)
+		return -1;
+
+	return 0;
+	//epoll_event ev	={ 0 };
+
+	//ev.data.ptr	= pTcpConnection;
+	//ev.events	= EPOLLIN | EPOLLET | EPOLLPRI | EPOLLHUP | EPOLLERR;
+
+	//return epoll_ctl(m_nepfd, EPOLL_CTL_ADD, pTcpConnection->m_nSock, &ev);
+#elif defined(__APPLE__)
+#endif
+}
+
+void CClientNetwork::RemoveConnection(CTcpConnection *pTcpConnection)
+{
+//#if defined(__linux)
+//	int ret = epoll_ctl(m_nepfd, EPOLL_CTL_DEL, pTcpConnection->m_nSock, NULL);
+//#elif defined(__APPLE__)
+//#endif
+	pTcpConnection->Disconnect();
+}
+
+void CClientNetwork::ProcessConnectedConnection()
+{
+	timeval			timeout			= {0, 0};
+	CTcpConnection	*pTcpConnection	= NULL;
+
+	for (list<CTcpConnection*>::iterator Iter = m_listActiveConn.begin(); Iter != m_listActiveConn.end();)
 	{
-		if (m_pLinkList[uiIndex].IsConnect())
+		pTcpConnection	= *Iter;
+
+		FD_ZERO(&m_ReadSet);
+		FD_ZERO(&m_WriteSet);
+		FD_ZERO(&m_ErrorSet);
+
+		FD_SET(pTcpConnection->m_nSock, &m_ReadSet);
+		FD_SET(pTcpConnection->m_nSock, &m_WriteSet);
+		FD_SET(pTcpConnection->m_nSock, &m_ErrorSet);
+
+		if (select(1024, &m_ReadSet, &m_WriteSet, &m_ErrorSet, &timeout) <= 0)
 		{
-			ProcessConnectedLink(&m_pLinkList[uiIndex]);
+			++Iter;
+			return;
 		}
-		else if (m_pLinkList[uiIndex].IsWaitConnect())
+
+		if (FD_ISSET(pTcpConnection->m_nSock, &m_ErrorSet))
 		{
-			ProcessWaitConnectLink(&m_pLinkList[uiIndex]);
+			RemoveConnection(pTcpConnection);
+			m_listCloseWaitConn.push_back(pTcpConnection);
+			Iter	= m_listActiveConn.erase(Iter);
+			continue;
 		}
+
+		if (FD_ISSET(pTcpConnection->m_nSock, &m_ReadSet))
+		{
+			if (pTcpConnection->RecvData() == -1)
+			{
+				RemoveConnection(pTcpConnection);
+				m_listCloseWaitConn.push_back(pTcpConnection);
+				Iter	= m_listActiveConn.erase(Iter);
+				continue;
+			}
+		}
+
+		if (FD_ISSET(pTcpConnection->m_nSock, &m_WriteSet))
+		{
+			if (pTcpConnection->SendData() == -1)
+			{
+				RemoveConnection(pTcpConnection);
+				m_listCloseWaitConn.push_back(pTcpConnection);
+				Iter	= m_listActiveConn.erase(Iter);
+				continue;
+			}
+		}
+
+		++Iter;
 	}
 }
 
-void CClientNetwork::ProcessConnectedLink(CTcpConnection *pNetLink)
+void CClientNetwork::ProcessWaitConnectConnection()
+{
+	timeval			timeout			= {0, 0};
+	CTcpConnection	*pTcpConnection	= NULL;
+
+	for (list<CTcpConnection*>::iterator Iter = m_listWaitConnectedConn.begin(); Iter != m_listWaitConnectedConn.end(); ++Iter)
+	{
+		pTcpConnection	= *Iter;
+
+		FD_ZERO(&m_ReadSet);
+		FD_ZERO(&m_WriteSet);
+
+		FD_SET(pTcpConnection->m_nSock, &m_ReadSet);
+		FD_SET(pTcpConnection->m_nSock, &m_WriteSet);
+
+		if (select(0, &m_ReadSet, &m_WriteSet, NULL, &timeout) <= 0)
+		{
+			++Iter;
+			continue;
+		}
+
+		if (!FD_ISSET(pTcpConnection->m_nSock, &m_WriteSet) && !FD_ISSET(pTcpConnection->m_nSock, &m_ReadSet))
+		{
+			++Iter;
+			continue;
+		}
+
+		int nError = 0;
+		socklen_t len = sizeof(nError);
+#if defined(WIN32) || defined(WIN64)
+		if (getsockopt(pTcpConnection->m_nSock, SOL_SOCKET, SO_ERROR, (char*)&nError, &len) < 0)
+#elif defined(__linux)
+		if (getsockopt(pTcpConnection->m_nSock, SOL_SOCKET, SO_ERROR, &nError, &len) < 0)
+#elif defined(__APPLE__)
+#endif
+		{
+#if defined(WIN32) || defined(WIN64)
+			g_pFileLog->WriteLog("getsockopt Failed errno=%d\n", WSAGetLastError());
+#elif defined(__linux)
+			g_pFileLog->WriteLog("getsockopt Failed errno=%d\n", errno);
+#elif defined(__APPLE__)
+#endif
+			RemoveConnection(pTcpConnection);
+
+			AddAvailableConnection(pTcpConnection);
+
+			Iter	= m_listWaitConnectedConn.erase(Iter);
+
+			continue;
+		}
+
+		if (nError != 0)
+		{
+#if defined(WIN32) || defined(WIN64)
+			g_pFileLog->WriteLog("Connnect Failed errno=%d\n", WSAGetLastError());
+#elif defined(__linux)
+			g_pFileLog->WriteLog("Connnect Failed errno=%d\n", errno);
+#elif defined(__APPLE__)
+#endif
+			RemoveConnection(pTcpConnection);
+
+			AddAvailableConnection(pTcpConnection);
+
+			Iter	= m_listWaitConnectedConn.erase(Iter);
+
+			continue;
+		}
+
+		if (-1 == SetNoBlocking(pTcpConnection))
+		{
+			RemoveConnection(pTcpConnection);
+
+			AddAvailableConnection(pTcpConnection);
+
+			Iter	= m_listWaitConnectedConn.erase(Iter);
+
+			continue;
+		}
+
+		pTcpConnection->ConnectSuccess();
+
+		m_listActiveConn.push_back(pTcpConnection);
+
+		Iter	= m_listWaitConnectedConn.erase(Iter);
+	}
+}
+
+void CClientNetwork::ProcessWaitCloseConnection()
+{
+	CTcpConnection	*pTcpConnection	= NULL;
+
+	for (list<CTcpConnection*>::iterator Iter = m_listCloseWaitConn.begin(); Iter != m_listCloseWaitConn.end();)
+	{
+		pTcpConnection	= *Iter;
+		if (pTcpConnection->IsLogicConnected())
+		{
+			++Iter;
+			continue;
+		}
+
+		AddAvailableConnection(pTcpConnection);
+
+		Iter	= m_listCloseWaitConn.erase(Iter);
+	}
+}
+
+bool CClientNetwork::IsConnectSuccess(CTcpConnection *pTcpConnection)
 {
 	timeval	timeout	= {0, 0};
 
 	FD_ZERO(&m_ReadSet);
 	FD_ZERO(&m_WriteSet);
-	FD_ZERO(&m_ErrorSet);
 
-	FD_SET(pNetLink->m_nSock, &m_ReadSet);
-	FD_SET(pNetLink->m_nSock, &m_WriteSet);
-	FD_SET(pNetLink->m_nSock, &m_ErrorSet);
-
-	if (select(1024, &m_ReadSet, &m_WriteSet, &m_ErrorSet, &timeout) <= 0)
-		return;
-
-	if (FD_ISSET(pNetLink->m_nSock, &m_ErrorSet))
-	{
-		CloseNetLink(pNetLink);
-	}
-	else
-	{
-		if (FD_ISSET(pNetLink->m_nSock, &m_ReadSet))
-		{
-			if (pNetLink->RecvData() == -1)
-			{
-				CloseNetLink(pNetLink);
-			}
-		}
-
-		if (FD_ISSET(pNetLink->m_nSock, &m_WriteSet))
-		{
-			if (pNetLink->SendData() == -1)
-			{
-				CloseNetLink(pNetLink);
-			}
-		}
-	}
-}
-
-void CClientNetwork::ProcessWaitConnectLink(CTcpConnection *pNetLink)
-{
-	timeval	timeout	= {0, 0};
-
-	FD_ZERO(&m_ReadSet);
-	FD_ZERO(&m_WriteSet);
-
-	FD_SET(pNetLink->m_nSock, &m_ReadSet);
-	FD_SET(pNetLink->m_nSock, &m_WriteSet);
+	FD_SET(pTcpConnection->m_nSock, &m_ReadSet);
+	FD_SET(pTcpConnection->m_nSock, &m_WriteSet);
 
 	if (select(0, &m_ReadSet, &m_WriteSet, NULL, &timeout) <= 0)
-		return;
+		return false;
 
-	if (!FD_ISSET(pNetLink->m_nSock, &m_WriteSet) && !FD_ISSET(pNetLink->m_nSock, &m_ReadSet))
-		return;
+	if (!FD_ISSET(pTcpConnection->m_nSock, &m_WriteSet) && !FD_ISSET(pTcpConnection->m_nSock, &m_ReadSet))
+		return false;
 
 	int nError = 0;
 	socklen_t len = sizeof(nError);
 #if defined(WIN32) || defined(WIN64)
-	if (getsockopt(pNetLink->m_nSock, SOL_SOCKET, SO_ERROR, (char*)&nError, &len) < 0)
+	if (getsockopt(pTcpConnection->m_nSock, SOL_SOCKET, SO_ERROR, (char*)&nError, &len) < 0)
 #elif defined(__linux)
-	if (getsockopt(pNetLink->m_nSock, SOL_SOCKET, SO_ERROR, &nError, &len) < 0)
+	if (getsockopt(pTcpConnection->m_nSock, SOL_SOCKET, SO_ERROR, &nError, &len) < 0)
 #elif defined(__APPLE__)
 #endif
 	{
@@ -350,9 +510,9 @@ void CClientNetwork::ProcessWaitConnectLink(CTcpConnection *pNetLink)
 		g_pFileLog->WriteLog("getsockopt Failed errno=%d\n", errno);
 #elif defined(__APPLE__)
 #endif
-		closesocket(pNetLink->m_nSock);
-		m_pFreeLink[--m_nFreeLinkIndex]	= pNetLink;
-		return;
+		closesocket(pTcpConnection->m_nSock);
+		AddAvailableConnection(pTcpConnection);
+		return false;
 	}
 
 	if (nError != 0)
@@ -363,41 +523,34 @@ void CClientNetwork::ProcessWaitConnectLink(CTcpConnection *pNetLink)
 		g_pFileLog->WriteLog("Connnect Failed errno=%d\n", errno);
 #elif defined(__APPLE__)
 #endif
-		closesocket(pNetLink->m_nSock);
-		m_pFreeLink[--m_nFreeLinkIndex]	= pNetLink;
-		return;
+		closesocket(pTcpConnection->m_nSock);
+		AddAvailableConnection(pTcpConnection);
+		return false;
 	}
 #if defined(WIN32) || defined(WIN64)
 	unsigned long ulNonBlock = 1;
-	if (ioctlsocket(pNetLink->m_nSock, FIONBIO, &ulNonBlock) == SOCKET_ERROR)
+	if (ioctlsocket(pTcpConnection->m_nSock, FIONBIO, &ulNonBlock) == SOCKET_ERROR)
 	{
 		g_pFileLog->WriteLog("Set socket async failed! errno=%d\n", WSAGetLastError());
-		closesocket(pNetLink->m_nSock);
-		m_pFreeLink[--m_nFreeLinkIndex]	= pNetLink;
-		return;
+		closesocket(pTcpConnection->m_nSock);
+		AddAvailableConnection(pTcpConnection);
+		return false;
 	}
 #elif defined(__linux)
-	int nFlags = fcntl(pNetLink->m_nSock, F_GETFL, 0);
-	if (nFlags < 0 || fcntl(pNetLink->m_nSock, F_SETFL, nFlags | O_NONBLOCK | O_ASYNC ) < 0)
+	int nFlags = fcntl(pTcpConnection->m_nSock, F_GETFL, 0);
+	if (nFlags < 0 || fcntl(pTcpConnection->m_nSock, F_SETFL, nFlags | O_NONBLOCK | O_ASYNC ) < 0)
 	{
 		g_pFileLog->WriteLog("Set socket async failed! errno=%d\n", errno);
-		closesocket(pNetLink->m_nSock);
-		m_pFreeLink[--m_nFreeLinkIndex]	= pNetLink;
-		return;
+		closesocket(pTcpConnection->m_nSock);
+		AddAvailableConnection(pTcpConnection);
+		return false;
 	}
 #elif defined(__APPLE__)
 #endif
 
-	pNetLink->Connected();
-}
+	pTcpConnection->ConnectSuccess();
 
-void CClientNetwork::CloseNetLink(CTcpConnection *pNetLink)
-{
-	pNetLink->Disconnect();
-
-	m_pFreeLink[--m_nFreeLinkIndex]	= pNetLink;
-
-	//m_pDisconnectFun(m_pFunParam, pNetLink->m_uConnID);
+	return true;
 }
 
 IClientNetwork *CreateClientNetwork(
