@@ -8,7 +8,7 @@
 #include <assert.h>
 #include <errno.h>
 
-#ifdef WIN32
+#if defined(WIN32) || defined(WIN64)
 #include <Winsock2.h>
 #include <Ws2tcpip.h>
 
@@ -25,7 +25,7 @@
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <netinet/in.h>
-
+#include <netdb.h>
 #define SOCKET int
 #define INVALID_SOCKET -1
 
