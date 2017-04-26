@@ -27,6 +27,5 @@ CFLAGS ="CXXFLAGS"
 
 AC_OUTPUT(Makefile
 				common/Makefile
-				LuaLib/Makefile
 				)        
 ~

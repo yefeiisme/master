@@ -1,10 +1,9 @@
 bin_PROGRAMS = main
 main_SOURCES = main.cpp
-SUBDIRS = common LuaLib
+SUBDIRS = common
 main_LDFLAGS = -static
-main_LDADD =  -lpthread
-main_LDADD+= ../Share/llib/libcommon.a
-main_LDADD+= ../Share/llib/liblua.a
+main_LDADD = ../Share/llib/libcommon.a
+main_LDADD += -lpthread
 
 INCLUDES = -I@top_srcdir@/Share/Header/
 INCLUDES += -I../Share/Header/
